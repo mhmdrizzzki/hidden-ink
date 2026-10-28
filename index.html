@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hidden-ink — secret messages inside AI images</title>
+<meta name="description" content="A Pollinations LLM writes a secret message, flux draws an ordinary picture, and the message hides inside its pixels.">
+<script src="./pollinations-client.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@pollinations/ui@0.1.0-alpha.20/dist/connect.js"></script>
+<style>
+:root{--bg:#0c0d12;--card:#15171f;--line:#262a38;--txt:#e9ebf2;--dim:#8a90a6;--acc:#7c5cff;--ok:#00d4aa;--warn:#ffb84d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.55}
+.wrap{max-width:880px;margin:0 auto;padding:22px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px}
+h1{font-size:20px;margin:0}
+h1 span{color:var(--acc)}
+.sub{color:var(--dim);font-size:13px;margin-top:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+.step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:99px;background:var(--acc);color:#fff;font-size:12px;font-weight:700;margin-right:8px}
+h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center}
+label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
+input[type=text],textarea{width:100%;padding:10px;border-radius:9px;border:1px solid var(--line);background:#0a0b10;color:var(--txt);font-size:13px;font-family:inherit}
+textarea{min-height:64px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button{padding:9px 16px;border:0;border-radius:9px;background:var(--acc);color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button:disabled{opacity:.45;cursor:not-allowed}
+#msg{font-size:12px;margin-top:10px;min-height:18px}
+#msg.ok{color:var(--ok)} #msg.err{color:#ff6b6b} #msg.warn{color:var(--warn)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+canvas{width:100%;border-radius:10px;border:1px solid var(--line);background:#0a0b10}
+.secret{font-family:ui-monospace,monospace;font-size:13px;background:#0a0b10;border:1px dashed var(--line);border-radius:9px;padding:10px;min-height:44px;word-break:break-word}
+.pill{display:inline-block;font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:3px 10px;margin-right:6px}
+footer{text-align:center;color:var(--dim);font-size:12px;padding:18px 0}
+footer a{color:var(--acc)}
+meter{width:100%;height:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>hidden-<span>ink</span></h1>
+      <div class="sub">A Pollinations LLM writes the secret. flux draws an ordinary picture. The message hides in the pixels.</div>
+    </div>
+    <polli-connect app-key="pk_uA3WPmDZbXHe1YDF" budget="5" expiry="7" models="text,image" hide-buy-pollen></polli-connect>
+  </header>
+
+  <div class="card">
+    <h2><span class="step">1</span> Cover image</h2>
+    <label for="coverPrompt">What should the picture look like?</label>
+    <input type="text" id="coverPrompt" value="a lighthouse at sunset, calm sea">
+    <div class="row">
+      <button id="drawBtn">Draw cover with flux</button>
+      <span class="pill">pollinations image · flux</span>
+    </div>
+    <div id="msg"></div>
+    <div class="grid" style="margin-top:14px">
+      <div>
+        <label>Cover</label>
+        <canvas id="coverCanvas" width="512" height="512"></canvas>
+      </div>
+      <div>
+        <label>Stego result (looks the same, carries the message)</label>
+        <canvas id="stegoCanvas" width="512" height="512"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span> Secret message</h2>
+    <label for="topic">Topic — the LLM writes something concealable about it</label>
+    <div class="row">
+      <input type="text" id="topic" value="the lighthouse keeper's last night" style="flex:1">
+      <button id="writeBtn" class="ghost">Write with LLM</button>
+    </div>
+    <label for="secret">The message that will be hidden (editable)</label>
+    <textarea id="secret" placeholder="Press “Write with LLM” or type your own."></textarea>
+    <div class="row">
+      <span class="pill">pollinations LLM · deepseek-v4-flash</span>
+      <span class="pill" id="capInfo">capacity: —</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span> Hide it</h2>
+    <label for="strength">Embedding strength (higher survives JPEG, lower is invisible)</label>
+    <input type="range" id="strength" min="1" max="4" value="2" step="1" style="width:100%">
+    <div class="row">
+      <button id="hideBtn">Hide message in image</button>
+      <button id="downloadBtn" class="ghost" disabled>Download PNG</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">4</span> Reveal it</h2>
+    <label for="file">Give any hidden-ink PNG back to the tool</label>
+    <input type="file" id="file" accept="image/png" style="font-size:13px;color:var(--dim)">
+    <div class="row"><button id="revealBtn" class="ghost">Extract secret</button></div>
+    <div class="secret" id="revealed" style="margin-top:12px">—</div>
+  </div>
+
+  <footer>
+    <a href="https://pollinations.ai">Made with pollinations.ai</a> ·
+    LLM <code>deepseek/deepseek-v4-flash</code> · image <code>flux</code> ·
+    every call bills your own Pollen (scoped BYOP key)
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const st = (t, cls) => { const m = $("msg"); m.textContent = t || ""; m.className = cls || ""; };
+
+function key() {
+  const c = document.querySelector("polli-connect");
+  return (c && c.apiKey) || sessionStorage.getItem("polli_byop_key") || "";
+}
+function needKey() {
+  if (!key()) { st("Click “Pollinations Connect” at the top first — the app needs your scoped key.", "err"); return false; }
+  return true;
+}
+
+function loadImage(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+function canvasFromBlob(blob) {
+  return new Promise(async (res, rej) => {
+    const url = URL.createObjectURL(blob);
+    try { const img = await loadImage(url); const c = $("coverCanvas"); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext("2d").drawImage(img, 0, 0); res(c); }
+    catch (e) { rej(e); }
+    finally { URL.revokeObjectURL(url); }
+  });
+}
+function clearCanvas(c) { const x = c.getContext("2d"); x.fillStyle = "#0a0b10"; x.fillRect(0, 0, c.width, c.height); }
+
+// ---------- LSB steganography (2 bits per channel at strength 1-4) ----------
+const MAGIC = "HINK";
+function capacityBits(w, h, bitsPerChannel) { return w * h * 3 * bitsPerChannel; }
+function bytesToBits(bytes) {
+  const out = [];
+  for (const b of bytes) for (let i = 7; i >= 0; i--) out.push((b >> i) & 1);
+  return out;
+}
+function bitsToBytes(bits) {
+  const out = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) { let v = 0; for (let j = 0; j < 8; j++) v = (v << 1) | bits[i + j]; out.push(v); }
+  return new Uint8Array(out);
+}
+function encode(text, canvas, bitsPerChannel) {
+  const ctx = canvas.getContext("2d");
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const payload = new TextEncoder().encode(text);
+  const header = new Uint8Array(8);
+  header.set(new TextEncoder().encode(MAGIC), 0);
+  new DataView(header.buffer).setUint32(4, payload.length, false);
+  const all = new Uint8Array(header.length + payload.length);
+  all.set(header, 0); all.set(payload, header.length);
+  const bits = bytesToBits(all);
+  const cap = capacityBits(canvas.width, canvas.height, bitsPerChannel);
+  if (bits.length > cap) throw new Error("Message too long for this image (" + payload.length + " bytes, max " + Math.floor((cap - 64) / 8) + ")");
+  const mask = (1 << bitsPerChannel) - 1;
+  let bi = 0;
+  for (let i = 0; i < d.length && bi < bits.length; i += 4) {
+    for (let ch = 0; ch < 3 && bi < bits.length; ch++) {
+      let v = 0;
+      for (let b = 0; b < bitsPerChannel; b++) v = (v << 1) | (bits[bi++] || 0);
+      d[i + ch] = (d[i + ch] & ~mask) | v;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  $("stegoCanvas").width = canvas.width; $("stegoCanvas").height = canvas.height;
+  const sctx = $("stegoCanvas").getContext("2d");
+  sctx.drawImage(canvas, 0, 0);
+  return canvas;
+}
+function decode(canvas, bitsPerChannel) {
+  const ctx = canvas.getContext("2d");
+  const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const mask = (1 << bitsPerChannel) - 1;
+  const bits = [];
+  for (let i = 0; i < d.length; i += 4) {
+    for (let ch = 0; ch < 3; ch++) {
+      const v = d[i + ch] & mask;
+      for (let b = bitsPerChannel - 1; b >= 0; b--) bits.push((v >> b) & 1);
+    }
+  }
+  const head = bitsToBytes(bits.slice(0, 64));
+  const magic = new TextDecoder().decode(head.slice(0, 4));
+  if (magic !== MAGIC) throw new Error("No hidden-ink message found at this strength.");
+  const len = new DataView(head.buffer, head.byteOffset, head.byteLength).getUint32(4, false);
+  const body = bitsToBytes(bits.slice(64, 64 + len * 8));
+  return new TextDecoder().decode(body);
+}
+
+// ---------- actions ----------
+$("drawBtn").onclick = async () => {
+  if (!needKey()) return;
+  const b = $("drawBtn"); b.disabled = true; b.textContent = "drawing…";
+  try {
+    st("flux is drawing your cover…");
+    const blob = await PolliClient.drawCover($("coverPrompt").value, { apiKey: key() });
+    await canvasFromBlob(blob);
+    st("Cover ready. flux · 512×512 — billed to your Pollen.", "ok");
+  } catch (e) { st(e.message, "err"); }
+  b.disabled = false; b.textContent = "Draw cover with flux";
+};
+
+$("writeBtn").onclick = async () => {
+  if (!needKey()) return;
+  const b = $("writeBtn"); b.disabled = true; b.textContent = "writing…";
+  try {
+    st("the LLM is writing a secret…");
+    const s = await PolliClient.writeSecret($("topic").value, { apiKey: key() });
+    $("secret").value = s;
+    st("Secret written by deepseek-v4-flash — billed to your Pollen.", "ok");
+  } catch (e) { st(e.message, "err"); }
+  b.disabled = false; b.textContent = "Write with LLM";
+};
+
+$("hideBtn").onclick = () => {
+  const msg = $("secret").value.trim();
+  if (!msg) { st("Write or type a secret first.", "err"); return; }
+  const c = $("coverCanvas");
+  if (!c.width || !c.getContext("2d").getImageData(0, 0, 1, 1).data[3] === 0) { st("Draw a cover image first.", "err"); return; }
+  const bits = Number($("strength").value);
+  try {
+    encode(msg, c, bits);
+    $("downloadBtn").disabled = false;
+    st("Hidden at strength " + bits + " (" + bits + " bits/channel). Download the PNG and send it to someone.", "ok");
+  } catch (e) { st(e.message, "err"); }
+};
+
+$("downloadBtn").onclick = () => {
+  const a = document.createElement("a");
+  a.download = "hidden-ink.png";
+  a.href = $("stegoCanvas").toDataURL("image/png");
+  a.click();
+};
+
+$("file").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  try {
+    const img = await loadImage(url);
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img, 0, 0);
+    let out = null, used = 0;
+    for (let bits = 1; bits <= 4; bits++) {
+      try { out = decode(c, bits); used = bits; break; } catch (_e) {}
+    }
+    $("revealed").textContent = out ? out : "— nothing hidden at any strength —";
+    st(out ? "Extracted at strength " + used + "." : "No hidden-ink message found.", out ? "ok" : "warn");
+  } catch (err) { st("Could not read that file.", "err"); }
+  finally { URL.revokeObjectURL(url); }
+};
+
+clearCanvas($("coverCanvas")); clearCanvas($("stegoCanvas"));
+</script>
+</body>
+</html>
