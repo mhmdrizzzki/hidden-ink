@@ -22,9 +22,10 @@ Visitors approve a **scoped key** (5 Pollen, 7 days, text + image only) on the P
 
 ## How hiding works
 1. The LLM sentence is encoded as `HINK` + a 4-byte length + UTF-8 payload.
-2. Those bits are written into the least-significant bits of the cover image's RGB channels — 1 to 4 bits per channel, chosen by the strength slider (higher survives re-encoding, lower is invisible).
+2. Those bits are written into the least-significant bits of the cover image's RGB channels — 1 to 4 bits per channel, chosen by the depth slider. Deeper embedding gives more capacity and slightly more tolerance to pixel noise, but **the message only survives lossless formats**: share the PNG as-is. Any lossy re-encode (JPEG, WebP lossy, a screenshot of the image, a chat app that recompresses) rewrites the low bits and destroys the payload. This is a property of LSB steganography, not a bug.
 3. Extraction reads the LSBs back, checks the `HINK` magic marker, and decodes the payload at whichever strength matches.
-4. Capacity is `width × height × 3 × bitsPerChannel` bits — a 512×512 cover fits ~96 KB at strength 1.
+4. Export is always lossless PNG (`canvas.toDataURL('image/png')`).
+5. Capacity is `width × height × 3 × bitsPerChannel` bits — a 512×512 cover fits ~96 KB at strength 1.
 
 ## Run
 Open the live app, or `python3 -m http.server` locally. Everything else is client-side.
